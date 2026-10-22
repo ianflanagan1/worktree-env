@@ -1,0 +1,175 @@
+"""The worktree-env command that uv installs into .venv/bin, run against a throwaway repository."""
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+BIN = Path(sys.prefix) / "bin" / "worktree-env"
+
+WORKSPACE = """\
+[worktree-env]
+name = "myapp"
+slots = 2
+env-file = "app/.env"
+up = ["sh", "-c", "echo started > up.txt"]
+down = ["sh", "-c", "echo stopped"]
+
+[worktree-env.env]
+COMPOSE_PROJECT_NAME = "{dir}"
+APP_URL = "https://{host}"
+"""
+
+
+@pytest.fixture
+def main(tmp_path: Path) -> Path:
+    """A main checkout, my-app, with a project config and a gitignored .env holding a secret."""
+    repo = tmp_path / "my-app"
+    (repo / "app").mkdir(parents=True)
+    (repo / ".workspace.toml").write_text(WORKSPACE)
+    (repo / ".gitignore").write_text("app/.env\nup.txt\n")
+    (repo / "app" / ".env").write_text("SECRET=abc\nAPP_URL=http://localhost:8080\n")
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "Start")
+    return repo
+
+
+@pytest.fixture(autouse=True)
+def machine_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text('domain = "dev.example.com"\n')
+    monkeypatch.setenv("WORKTREE_ENV_CONFIG", str(config))
+
+
+def git(repo: Path, *args: str) -> str:
+    env = os.environ | {
+        "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@example.com",
+        "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@example.com",
+    }  # fmt: skip
+    return subprocess.run(
+        ["git", *args], cwd=repo, env=env, check=True, capture_output=True, text=True
+    ).stdout
+
+
+def launch(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+    # A new session has no controlling terminal, as when an agent runs the command.
+    return subprocess.run(
+        [BIN, *args],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        env=os.environ | {"NO_COLOR": "1"},
+        start_new_session=True,
+    )
+
+
+def test_help_lists_the_commands(main: Path):
+    result = launch("--help", cwd=main)
+    assert result.returncode == 0
+    for command in ("list", "new", "rm", "configure"):
+        assert f"  {command}" in result.stdout
+
+
+def test_configure_sets_the_main_checkouts_env_for_the_main_slot(main: Path):
+    result = launch("configure", cwd=main)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith(
+        "✅ Set app/.env for main.\nhttps://main.myapp.dev.example.com\n"
+    )
+    assert (main / "app" / ".env").read_text() == (
+        "SECRET=abc\nAPP_URL=https://main.myapp.dev.example.com\n"
+        "\n# Set by worktree-env\nCOMPOSE_PROJECT_NAME=my-app\n"
+    )
+    assert launch("configure", cwd=main).stdout == "➖ app/.env is already set for main.\n"
+
+
+def test_new_creates_a_worktree_in_the_lowest_free_slot_with_the_main_checkouts_secrets(main: Path):
+    result = launch("new", cwd=main)
+    assert result.returncode == 0, result.stderr
+    wt1 = main.parent / "my-app-wt1"
+    assert result.stdout.splitlines()[-3:] == [
+        "✅ Created wt1.",
+        "https://wt1.myapp.dev.example.com",
+        str(wt1.resolve()),
+    ]
+    assert (wt1 / "app" / ".env").read_text() == (
+        "SECRET=abc\nAPP_URL=https://wt1.myapp.dev.example.com\n"
+        "\n# Set by worktree-env\nCOMPOSE_PROJECT_NAME=my-app-wt1\n"
+    )
+    assert (wt1 / "up.txt").read_text() == "started\n"
+    assert git(wt1, "branch", "--show-current") == ""
+
+
+def test_list_shows_each_slot_in_use(main: Path):
+    launch("new", cwd=main)
+    result = launch("list", cwd=main)
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[0].split()[:3] == [
+        "main",
+        "https://main.myapp.dev.example.com",
+        str(main.resolve()),
+    ]
+    assert lines[1].split()[:2] == ["wt1", "https://wt1.myapp.dev.example.com"]
+    assert lines[-1] == "➖ 1 of 2 worktree slots in use."
+
+
+def test_new_stops_when_every_slot_is_in_use(main: Path):
+    launch("new", cwd=main)
+    launch("new", cwd=main)
+    result = launch("new", cwd=main)
+    assert result.returncode == 1
+    assert result.stderr.startswith("⚠️ All 2 worktree slots are in use.\n")
+
+
+def test_removing_a_free_slot_has_nothing_to_do(main: Path):
+    result = launch("rm", "wt1", cwd=main)
+    assert (result.returncode, result.stdout) == (0, "➖ wt1 isn't in use.\n")
+
+
+def test_removing_a_worktree_needs_its_name_typed_at_a_terminal(main: Path):
+    launch("new", cwd=main)
+    result = launch("rm", "wt1", cwd=main)
+    assert result.returncode == 1
+    assert result.stderr.startswith("⚠️ No terminal to confirm at.")
+    assert (main.parent / "my-app-wt1").is_dir()
+
+
+def test_a_worktree_with_uncommitted_changes_is_not_removed(main: Path):
+    launch("new", cwd=main)
+    (main.parent / "my-app-wt1" / "draft.txt").write_text("unsaved")
+    result = launch("rm", "wt1", cwd=main)
+    assert result.returncode == 1
+    assert result.stderr.startswith("⚠️ wt1 has uncommitted changes.\n?? draft.txt")
+
+
+def test_a_worktree_with_commits_on_no_branch_is_not_removed(main: Path):
+    launch("new", cwd=main)
+    wt1 = main.parent / "my-app-wt1"
+    git(wt1, "commit", "-q", "--allow-empty", "-m", "Work in progress")
+    result = launch("rm", "wt1", cwd=main)
+    assert result.returncode == 1
+    assert result.stderr.startswith("⚠️ wt1 has commits on no branch, which removing it would lose.")
+
+
+def test_the_main_checkout_cannot_be_removed(main: Path):
+    result = launch("rm", "main", cwd=main)
+    assert (result.returncode, result.stderr) == (1, "⚠️ The main checkout can't be removed.\n")
+
+
+def test_a_checkout_outside_the_pool_is_not_configured(main: Path):
+    elsewhere = main.parent / "elsewhere"
+    git(main, "worktree", "add", "-q", "--detach", str(elsewhere))
+    result = launch("configure", cwd=elsewhere)
+    assert result.returncode == 1
+    assert result.stderr.startswith(f"⚠️ {elsewhere.resolve()} isn't in a slot.")
+
+
+def test_without_the_machine_config_it_says_how_to_create_it(main: Path, tmp_path: Path):
+    (tmp_path / "config.toml").unlink()
+    result = launch("list", cwd=main)
+    assert result.returncode == 1
+    assert "Copy config.example.toml there and set your domain." in result.stderr

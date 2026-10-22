@@ -1,0 +1,6 @@
+# This machine's settings for worktree-env. Copy this file to config.toml, which git ignores,
+# and edit it.
+
+# The domain every project's dev names go under: <slot>.<project>.<domain>. Its DNS must point
+# them all at this machine, as local-https-proxy's setup does with a wildcard record.
+domain = "dev.example.com"
