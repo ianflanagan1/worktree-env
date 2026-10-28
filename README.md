@@ -31,24 +31,25 @@ The main checkout is slot `main`; other worktrees take `wt1` to `wt9`. Slots are
 | Command | Does |
 |---|---|
 | `worktree-env` or `worktree-env list` | Lists the slots in use, with each one's URL, directory and what it has checked out |
-| `worktree-env new` | Creates a worktree in the lowest free slot, beside the main checkout as `<main>-wt<n>` and detached at the base branch's tip. Copies the main checkout's `.env`, so it has the same secrets, sets the slot's variables in it, and runs the project's `up` command |
+| `worktree-env new` | Creates a worktree in the lowest free slot, beside the main checkout as `<main>-wt<n>` and detached at the tip of the base branch, or of the default branch (see [git-default-branch](../git-default-branch)). Copies the main checkout's `.env`, so it has the same secrets, sets the slot's variables in it, and runs the project's `up` command |
 | `worktree-env rm <slot>` | Runs the project's `down` command in that worktree, then removes it, freeing the slot. Refuses one with uncommitted changes or commits on no branch, and asks you to type the slot's name |
 | `worktree-env configure` | Sets this checkout's `.env` for its slot. Run it once in the main checkout |
 
 ## Configuring a project
 
-A project declares its slots in the `[worktree-env]` table of `.workspace.toml` at its root:
+A project declares its slots in `.config/ianf-worktree-env.toml`, committed in its repository, as [repo-settings](../repo-settings) describes. worktree-env reads the copy committed on the default branch, which every new worktree starts from, so every checkout goes by the same slots. An edit takes effect once it's committed there; until then, worktree-env says on stderr that your checkout's copy isn't used:
 
 ```toml
-[worktree-env]
+#:schema https://raw.githubusercontent.com/ianflanagan1/worktree-env/main/schema/ianf-worktree-env.v1.json
+version = 1                       # the version of this file's format: see schema/
 name = "myapp"                    # the DNS label: <slot>.myapp.<domain>
 slots = 9                         # worktrees besides the main checkout (default 9)
-base = "main"                     # the branch new worktrees start from (default main)
+base = "main"                     # the branch new worktrees start from (default: the repository's default branch)
 env-file = "app/.env"             # the checkout's .env, gitignored
 up = ["task", "setup"]            # run in a new worktree, to start its stack (optional)
 down = ["task", "down:delete"]    # run before removing one, to stop its stack and delete its data (optional)
 
-[worktree-env.env]                # set in env-file; {slot}, {host} and {dir} are filled in
+[env]                             # set in env-file; {slot}, {host} and {dir} are filled in
 COMPOSE_PROJECT_NAME = "{dir}"
 COMPOSE_FILE = "compose.yaml:compose.local-https-proxy.yaml"
 APP_URL = "https://{host}"

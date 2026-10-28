@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ianflanagan1/worktree-env/main/schema/ianf-worktree-env.v1.json",
+  "title": ".config/ianf-worktree-env.toml, version 1",
+  "description": "Each checkout's own HTTPS hostname, .env and stack, for worktree-env, which reads only the copy committed on the default branch: an edit takes effect once it's committed there. See worktree-env's README.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "name", "env-file"],
+  "properties": {
+    "version": {
+      "description": "The version of this file's format.",
+      "const": 1
+    },
+    "name": {
+      "description": "The DNS label under the domain: <slot>.<name>.<domain>.",
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+    },
+    "slots": {
+      "description": "How many worktrees besides the main checkout.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 99,
+      "default": 9
+    },
+    "base": {
+      "description": "The branch new worktrees start from. The repository's default branch if left out.",
+      "type": "string",
+      "minLength": 1
+    },
+    "env-file": {
+      "description": "The checkout's .env file, gitignored, from its root.",
+      "type": "string",
+      "minLength": 1
+    },
+    "up": { "$ref": "#/$defs/command", "description": "Run in a new worktree, to start its stack." },
+    "down": { "$ref": "#/$defs/command", "description": "Run before removing a worktree, to stop its stack and delete its data." },
+    "env": {
+      "description": "Variables set in env-file. {slot}, {host} and {dir} are filled in.",
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "default": {}
+    }
+  },
+  "$defs": {
+    "command": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    }
+  }
+}

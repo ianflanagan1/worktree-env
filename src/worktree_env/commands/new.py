@@ -1,13 +1,15 @@
 """worktree-env new
 
 Creates a worktree in the lowest free slot: beside the main checkout as <main>-wt<n>, detached at
-the tip of the project's base branch. Its .env file starts as a copy of the main checkout's, so
-it has the same secrets, with the slot's own URL and compose project set. Then it runs the
-project's up command there, to start the stack.
+the tip of the project's base branch, or of the repository's default branch when it sets none.
+Its .env file starts as a copy of the main checkout's, so it has the same secrets, with the
+slot's own URL and compose project set. Then it runs the project's up command there, to start
+the stack.
 """
 
 from cli_kit import cli, proc
 from cli_kit.outcome import Done, Precondition, changed
+from git_default_branch import default_branch
 
 from worktree_env import context, envfile, settings, slots
 from worktree_env.context import Context
@@ -38,9 +40,16 @@ def new(ctx: Context) -> Done:
     main_env = ctx.main / project.env_file
     if not main_env.is_file():
         raise Precondition(f"No {project.env_file} in the main checkout to copy.")
+    base = project.base or default_branch(ctx.main, ask_remote=True)
+    if base is None:
+        raise Precondition(
+            "Can't tell which branch to start the worktree from.",
+            "Set base in .config/ianf-worktree-env.toml, or the repository's default branch"
+            " with: git config default-branch.name <branch>",
+        )
 
-    proc.output("git", "worktree", "add", "--detach", str(path), project.base)
-    changed(f"Created {path}, detached at {project.base}.")
+    proc.output("git", "worktree", "add", "--detach", str(path), base)
+    changed(f"Created {path}, detached at {base}.")
 
     values = settings.values(project, slot, ctx.machine.domain, path.name)
     env = path / project.env_file

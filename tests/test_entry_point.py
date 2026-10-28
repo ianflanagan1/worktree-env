@@ -9,15 +9,15 @@ import pytest
 
 BIN = Path(sys.prefix) / "bin" / "worktree-env"
 
-WORKSPACE = """\
-[worktree-env]
+SETTINGS = """\
+version = 1
 name = "myapp"
 slots = 2
 env-file = "app/.env"
 up = ["sh", "-c", "echo started > up.txt"]
 down = ["sh", "-c", "echo stopped"]
 
-[worktree-env.env]
+[env]
 COMPOSE_PROJECT_NAME = "{dir}"
 APP_URL = "https://{host}"
 """
@@ -28,13 +28,23 @@ def main(tmp_path: Path) -> Path:
     """A main checkout, my-app, with a project config and a gitignored .env holding a secret."""
     repo = tmp_path / "my-app"
     (repo / "app").mkdir(parents=True)
-    (repo / ".workspace.toml").write_text(WORKSPACE)
+    (repo / ".config").mkdir()
+    (repo / ".config" / "ianf-worktree-env.toml").write_text(SETTINGS)
     (repo / ".gitignore").write_text("app/.env\nup.txt\n")
     (repo / "app" / ".env").write_text("SECRET=abc\nAPP_URL=http://localhost:8080\n")
     git(repo, "init", "-q", "-b", "main")
     git(repo, "add", ".")
     git(repo, "commit", "-q", "-m", "Start")
     return repo
+
+
+@pytest.fixture(autouse=True)
+def no_global_git_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Git reads none of this machine's config, such as its init.defaultBranch."""
+    empty = tmp_path / "gitconfig"
+    empty.touch()
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
 
 
 @pytest.fixture(autouse=True)
@@ -73,6 +83,36 @@ def test_help_lists_the_commands(main: Path):
         assert f"  {command}" in result.stdout
 
 
+def test_a_project_without_its_settings_file_on_the_default_branch_is_named(main: Path):
+    git(main, "rm", "-q", ".config/ianf-worktree-env.toml")
+    git(main, "commit", "-q", "-m", "Drop the settings")
+    result = launch("configure", cwd=main)
+    assert result.returncode == 1
+    assert result.stderr.startswith("⚠️ No .config/ianf-worktree-env.toml on main.\n")
+
+
+def test_settings_are_read_as_committed_on_the_default_branch(main: Path):
+    git(main, "switch", "-q", "-c", "spike")
+    settings = main / ".config" / "ianf-worktree-env.toml"
+    settings.write_text(SETTINGS.replace("myapp", "spike"))
+    git(main, "commit", "-q", "-am", "Rename on a branch")
+    result = launch("configure", cwd=main)
+    assert result.returncode == 0, result.stderr
+    assert "APP_URL=https://main.myapp.dev.example.com" in (main / "app" / ".env").read_text()
+
+
+def test_edits_to_a_checkouts_own_copy_are_said_to_be_unused(main: Path):
+    settings = main / ".config" / "ianf-worktree-env.toml"
+    settings.write_text(SETTINGS.replace("myapp", "edited"))
+    result = launch("configure", cwd=main)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr.startswith(
+        f"Your edits to {settings.resolve()} aren't used: .config/ianf-worktree-env.toml on main"
+        " is.\n"
+    )
+    assert "APP_URL=https://main.myapp.dev.example.com" in (main / "app" / ".env").read_text()
+
+
 def test_configure_sets_the_main_checkouts_env_for_the_main_slot(main: Path):
     result = launch("configure", cwd=main)
     assert result.returncode == 0, result.stderr
@@ -101,6 +141,27 @@ def test_new_creates_a_worktree_in_the_lowest_free_slot_with_the_main_checkouts_
     )
     assert (wt1 / "up.txt").read_text() == "started\n"
     assert git(wt1, "branch", "--show-current") == ""
+
+
+def test_new_starts_from_the_repositorys_default_branch_when_no_base_is_set(main: Path):
+    git(main, "branch", "-m", "main", "trunk")
+    git(main, "config", "default-branch.name", "trunk")
+    git(main, "commit", "-q", "--allow-empty", "-m", "On trunk")
+    git(main, "checkout", "-q", "-b", "spike")
+    git(main, "commit", "-q", "--allow-empty", "-m", "On spike")
+    result = launch("new", cwd=main)
+    assert result.returncode == 0, result.stderr
+    assert "detached at trunk." in result.stdout
+    wt1 = main.parent / "my-app-wt1"
+    assert git(wt1, "log", "-1", "--format=%s").strip() == "On trunk"
+
+
+def test_new_stops_before_changing_anything_when_it_cannot_tell_where_to_start(main: Path):
+    git(main, "branch", "master")
+    result = launch("new", cwd=main)
+    assert result.returncode == 1
+    assert result.stderr.startswith("⚠️ Can't tell the default branch: there's no remote")
+    assert not (main.parent / "my-app-wt1").exists()
 
 
 def test_list_shows_each_slot_in_use(main: Path):

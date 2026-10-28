@@ -1,8 +1,8 @@
 """worktree-env configure
 
 Sets the variables in this checkout's .env file for its slot: its URL, its compose project and
-whatever else the project's [worktree-env] table lists. Every other line is kept. Run it once in
-the main checkout; `worktree-env new` runs it for each new worktree.
+whatever else the project's .config/ianf-worktree-env.toml lists. Every other line is kept. Run it
+once in the main checkout; `worktree-env new` runs it for each new worktree.
 """
 
 from cli_kit import cli

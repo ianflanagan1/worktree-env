@@ -7,12 +7,15 @@ import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import assert_never
 
+import repo_settings
 from cli_kit import proc
 from cli_kit.outcome import Failure, Precondition
+from repo_settings import Missing, Settings, Source, Unlocatable
 
 from worktree_env import config, slots
-from worktree_env.config import Invalid, Machine, Project
+from worktree_env.config import Invalid, Machine, Project, Version
 from worktree_env.worktrees import Worktree, parse
 
 # The tool's root: .venv's parent, as `uv sync` builds it there. Gitignored, as each machine has
@@ -43,14 +46,32 @@ def load() -> Context:
     worktrees = parse(proc.output("git", "worktree", "list", "--porcelain"))
     main = worktrees[0].path.resolve()  # git always lists the main worktree first
     worktrees = [Worktree(w.path.resolve(), w.head, w.branch) for w in worktrees]
-    return Context(main, here, _project(main), _machine(), worktrees)
+    return Context(main, here, _project(here), _machine(), worktrees)
 
 
-def _project(main: Path) -> Project:
-    path = main / ".workspace.toml"
-    read = config.project(_toml(path, f"No .workspace.toml in the main checkout, {main}."))
+def _project(here: Path) -> Project:
+    """The project's settings as committed on the default branch, which every new worktree starts
+    from, so every checkout goes by the same slots. Says so on stderr when this checkout's own copy
+    differs, as its edits aren't used until they're committed there."""
+    settings = repo_settings.read(Source.LOCAL_DEFAULT_BRANCH, here, config.PURPOSE, Version)
+    match settings:
+        case Settings():
+            pass
+        case Missing():
+            raise Precondition(f"No {settings.where}.", "Add one, as worktree-env's README shows.")
+        case Unlocatable() | repo_settings.Invalid():
+            raise Precondition(settings.message, *settings.details)
+        case _:
+            assert_never(settings)
+    if note := repo_settings.notice(settings):
+        print(note, file=sys.stderr)
+    match settings.version:
+        case Version.V1:
+            read = config.project(settings.table)
+        case _:
+            assert_never(settings.version)
     if isinstance(read, Invalid):
-        raise Precondition(read.message, *read.details, f"In {path}.")
+        raise Precondition(read.message, *read.details, f"In {settings.where}.")
     return read
 
 
