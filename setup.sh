@@ -2,7 +2,7 @@
 # Creates config.toml and links worktree-env onto your PATH. Run with `devbox run setup`, which
 # first runs `uv sync` to build .venv.
 
-set -eu
+set -o errexit -o nounset
 
 here=$(cd "$(dirname "$0")" && pwd -P)
 

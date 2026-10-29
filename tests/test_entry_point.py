@@ -32,9 +32,9 @@ def main(tmp_path: Path) -> Path:
     (repo / ".config" / "ianf-worktree-env.toml").write_text(SETTINGS)
     (repo / ".gitignore").write_text("app/.env\nup.txt\n")
     (repo / "app" / ".env").write_text("SECRET=abc\nAPP_URL=http://localhost:8080\n")
-    git(repo, "init", "-q", "-b", "main")
+    git(repo, "init", "--quiet", "--initial-branch", "main")
     git(repo, "add", ".")
-    git(repo, "commit", "-q", "-m", "Start")
+    git(repo, "commit", "--quiet", "--message", "Start")
     return repo
 
 
@@ -84,18 +84,18 @@ def test_help_lists_the_commands(main: Path):
 
 
 def test_a_project_without_its_settings_file_on_the_default_branch_is_named(main: Path):
-    git(main, "rm", "-q", ".config/ianf-worktree-env.toml")
-    git(main, "commit", "-q", "-m", "Drop the settings")
+    git(main, "rm", "--quiet", ".config/ianf-worktree-env.toml")
+    git(main, "commit", "--quiet", "--message", "Drop the settings")
     result = launch("configure", cwd=main)
     assert result.returncode == 1
     assert result.stderr.startswith("⚠️ No .config/ianf-worktree-env.toml on main.\n")
 
 
 def test_settings_are_read_as_committed_on_the_default_branch(main: Path):
-    git(main, "switch", "-q", "-c", "spike")
+    git(main, "switch", "--quiet", "--create", "spike")
     settings = main / ".config" / "ianf-worktree-env.toml"
     settings.write_text(SETTINGS.replace("myapp", "spike"))
-    git(main, "commit", "-q", "-am", "Rename on a branch")
+    git(main, "commit", "--quiet", "--all", "--message", "Rename on a branch")
     result = launch("configure", cwd=main)
     assert result.returncode == 0, result.stderr
     assert "APP_URL=https://main.myapp.dev.example.com" in (main / "app" / ".env").read_text()
@@ -144,11 +144,11 @@ def test_new_creates_a_worktree_in_the_lowest_free_slot_with_the_main_checkouts_
 
 
 def test_new_starts_from_the_repositorys_default_branch_when_no_base_is_set(main: Path):
-    git(main, "branch", "-m", "main", "trunk")
+    git(main, "branch", "--move", "main", "trunk")
     git(main, "config", "default-branch.name", "trunk")
-    git(main, "commit", "-q", "--allow-empty", "-m", "On trunk")
-    git(main, "checkout", "-q", "-b", "spike")
-    git(main, "commit", "-q", "--allow-empty", "-m", "On spike")
+    git(main, "commit", "--quiet", "--allow-empty", "--message", "On trunk")
+    git(main, "checkout", "--quiet", "-b", "spike")
+    git(main, "commit", "--quiet", "--allow-empty", "--message", "On spike")
     result = launch("new", cwd=main)
     assert result.returncode == 0, result.stderr
     assert "detached at trunk." in result.stdout
@@ -210,7 +210,7 @@ def test_a_worktree_with_uncommitted_changes_is_not_removed(main: Path):
 def test_a_worktree_with_commits_on_no_branch_is_not_removed(main: Path):
     launch("new", cwd=main)
     wt1 = main.parent / "my-app-wt1"
-    git(wt1, "commit", "-q", "--allow-empty", "-m", "Work in progress")
+    git(wt1, "commit", "--quiet", "--allow-empty", "--message", "Work in progress")
     result = launch("rm", "wt1", cwd=main)
     assert result.returncode == 1
     assert result.stderr.startswith("⚠️ wt1 has commits on no branch, which removing it would lose.")
@@ -223,7 +223,7 @@ def test_the_main_checkout_cannot_be_removed(main: Path):
 
 def test_a_checkout_outside_the_pool_is_not_configured(main: Path):
     elsewhere = main.parent / "elsewhere"
-    git(main, "worktree", "add", "-q", "--detach", str(elsewhere))
+    git(main, "worktree", "add", "--quiet", "--detach", str(elsewhere))
     result = launch("configure", cwd=elsewhere)
     assert result.returncode == 1
     assert result.stderr.startswith(f"⚠️ {elsewhere.resolve()} isn't in a slot.")
