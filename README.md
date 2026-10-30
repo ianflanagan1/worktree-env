@@ -63,7 +63,7 @@ Give each slot's compose project its own name, as `COMPOSE_PROJECT_NAME = "{dir}
 
 ```sh
 cd ~/projects/cli/worktree-env
-devbox run setup   # uv sync, creates config.toml, then links worktree-env into ~/.local/bin
+devbox run -- task setup   # uv sync, creates config.toml, then links worktree-env into ~/.local/bin
 ```
 
 Then set `domain` in `config.toml`: the domain every project's dev names go under, such as `dev.example.com`.
@@ -71,8 +71,8 @@ Then set `domain` in `config.toml`: the domain every project's dev names go unde
 ## Development
 
 ```sh
-devbox run test    # pytest
-devbox run lint    # ruff check and format
+devbox run -- task test    # pytest
+devbox run -- task lint    # ruff check and format
 ```
 
 ## License
