@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
 
-PURPOSE = "worktree-env"
+FILE = ".config/ianf-worktree-env.toml"
 PLACEHOLDERS = ("slot", "host", "dir")
 LABEL = r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
 

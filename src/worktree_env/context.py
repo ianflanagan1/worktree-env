@@ -53,7 +53,7 @@ def _project(here: Path) -> Project:
     """The project's settings as committed on the default branch, which every new worktree starts
     from, so every checkout goes by the same slots. Says so on stderr when this checkout's own copy
     differs, as its edits aren't used until they're committed there."""
-    settings = repo_settings.read(Source.LOCAL_DEFAULT_BRANCH, here, config.PURPOSE, Version)
+    settings = repo_settings.read(Source.LOCAL_DEFAULT_BRANCH, here, config.FILE, Version)
     match settings:
         case Settings():
             pass
