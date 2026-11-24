@@ -73,6 +73,7 @@ Then set `domain` in `config.toml`: the domain every project's dev names go unde
 ```sh
 devbox run -- task test    # pytest
 devbox run -- task lint    # ruff check and format
+devbox run -- task check   # lint, then test, failing on any problem
 ```
 
 ## License
